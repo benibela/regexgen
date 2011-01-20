@@ -7,6 +7,7 @@
 #include <stdlib.h>
 QMap<QChar, QString> characterClasses;
 QString ALL_CHARACTERS = "0-9A-Za-z_+-*/=<>()[]{}!.,;:$%\"'#~";
+bool printProgress = false;
 
 struct CharBlock {
 	//set on init
@@ -36,12 +37,15 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 	char word[blocks.length()+1];
 	CharBlock vars[blocks.size()+1];
 	int actualBlockCount = 0;
+	long int totalPos = 1;
 	for (int i=0;i<blocks.size();i++){
 		blocks[i].pos = i;
 		blocks[i].choosen = 0;
 		blocks[i].len = blocks[i].slowData.length();
 		blocks[i].data = blocks[i].slowData.data(); //QByteArray::data keeps the data in memory (in contrast to QString::toAscii and qPrintable which DON'T WORK HERE)
 		word[i] = *blocks[i].data;
+		totalPos*=blocks[i].len;
+		Q_ASSERT(blocks[i].len > 0);
 		if (blocks[i].type == CharBlock::CBT_FIXED) Q_ASSERT(blocks[i].len==1);
 		else vars[actualBlockCount++] = blocks[i];
 	}
@@ -49,6 +53,9 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 //		printf(">%s<\n",vars[i].data);
 	word[blocks.length()]=0;
 	if (actualBlockCount==0) {printf("%s\n", word); return;}
+
+	if (maxLines > 0) totalPos = maxLines;
+	int progressNext = printProgress?totalPos / 10:totalPos;
 
 	if (!randomized) {
 		int r = 0;
@@ -63,7 +70,13 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 				word[vars[i].pos] = vars[i].data[vars[i].choosen];
 				printf("%s\n", word);
 				r++;
-				if (maxLines > 0 && r>=maxLines) break;
+				if (r>=progressNext) {
+					if (printProgress) {
+						fprintf(stderr, "      Progress: %i/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
+						progressNext = qMin(totalPos, progressNext + totalPos/10);
+					}
+					if (maxLines > 0 && r>=maxLines) break;
+				}
 			} else {
 	//			printf("%s\n", word);
 				break;
@@ -72,11 +85,7 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 			word[vars[0].pos] = vars[0].data[vars[0].choosen];
 		}
 	} else {
-		if (maxLines < 0) {
-			maxLines = 1;
-			for (int i=0;i<actualBlockCount;i++)
-				maxLines*=vars[i].len;
-		}
+		if (maxLines <= 0) maxLines = totalPos;
 		for (int r=0;r<maxLines;r++) {
 			for (int i=0;i<actualBlockCount;i++)
 				word[vars[i].pos] = vars[i].slowData[randUntil(vars[i].len)];
@@ -108,6 +117,7 @@ QByteArray invertCharset(const QString& charset){
 
 //creates a block for a [..] range
 CharBlock createBlock(const QString& range){
+	Q_ASSERT(range.length() > 0);
 	CharBlock cb;
 //	qDebug("%s", qPrintable(range));
 	if (range.length()==1) {
@@ -251,6 +261,7 @@ int main(int argc, char* argv[])
 		} else if (arg=="-reduce-to-charsets") expandOnly = true;
 		else if (arg=="-choose-randomized") chooseRandomized = true;
 		else if (arg=="-max-expand-lines") maxExpandLines=QString(argv[++i]).toInt();
+		else if (arg=="-progress") printProgress = true;
 		else  {
 			printf("RegEx-Solution-Generator\n");
 			printf("This program generates to a list of simple regexs all strings matching these regex\n");
@@ -275,6 +286,7 @@ int main(int argc, char* argv[])
 			printf("  --reduce-to-charsets\tGenerate a set of regex limited to charsets that match the same strings as the original regex\n");
 			printf("  --choose-randomized\tDon't print all possible matches in a systematic way, but choose random ones\n");
 			printf("  --max-expand-lines \"max matches printed foreach charset regex\"\n");
+			printf("  --progress\tPrint progress to stderr\n");
 			return 0;
 		}
 	}
@@ -293,6 +305,7 @@ int main(int argc, char* argv[])
 #ifndef Q_WS_WIN32
 	in.setCodec("utf-8");
 #endif
+	int loopCount = 0;
 	while (true) {
 		QString cur = in.readLine();
 		if (cur.isNull()) break;
@@ -304,6 +317,8 @@ int main(int argc, char* argv[])
 		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
 		bool merged = true;
+		loopCount++;
+		if (printProgress) fprintf(stderr, "Processing regex %i: %s\n", loopCount, qPrintable(cur));
 		//Stack of (block-)stringlists
 		//Each stringlist contains all possible block match for a subterm of the regex (brackets or enums)
 		//Everything except charsets is expanded
@@ -438,9 +453,10 @@ int main(int argc, char* argv[])
 						break;
 				printf("\n");
 			}
-		} else for (int i=0;i<lists.first().length();i++)
+		} else for (int i=0;i<lists.first().length();i++) {
+			if (printProgress) fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
 			printPossibilities(lists.first()[i],chooseRandomized,maxExpandLines);
-
+		}
 		Q_ASSERT(lists.size()==1);
 	}
 	return 0;
