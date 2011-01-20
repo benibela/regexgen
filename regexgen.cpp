@@ -109,6 +109,8 @@ CharBlock createBlock(const QString& range){
 typedef QList<CharBlock> BlockString;
 typedef QList<BlockString> BlockStringList;
 
+
+
 void multiplyLists(QList<BlockStringList>& lists, int minRep = 1, int maxRep = 1){
 	if (minRep == 0 && maxRep == 0 || lists.size() == 1) return;
 
@@ -128,6 +130,12 @@ void multiplyLists(QList<BlockStringList>& lists, int minRep = 1, int maxRep = 1
 		old = nev;
 	}
 	lists.append(result);
+}
+
+void concatLists(QList<BlockStringList>& lists, bool merged) {
+	if (!merged) multiplyLists(lists);
+	BlockStringList enums =  lists.takeLast();
+	lists.last().append(enums);
 }
 
 
@@ -202,14 +210,15 @@ int main(int argc, char* argv[])
 	}
 
 	QTextStream in(stdin);
-	bool merged = false;
 	while (!in.atEnd()) {
 		QString cur = in.readLine();
 		if (cur.startsWith("^")) cur = cur.mid(1);
 		else if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
 		QList< BlockStringList > lists;
-		lists << (BlockStringList() << BlockString());
+		bool merged = true;
+		lists << (BlockStringList()) << (BlockStringList() << BlockString());
+
 		for (int i=0;i<cur.length();i++){
 			switch (cur[i].toAscii()) {
 			case '[':{
@@ -256,21 +265,31 @@ int main(int argc, char* argv[])
 			case '+':
 				Q_ASSERT(!merged);
 				multiplyLists(lists, 1, INFINITY_PLUS);
+				merged = true;
 				break;
 			case '*':
 				Q_ASSERT(!merged);
 				multiplyLists(lists, 0, INFINITY_STAR);
+				merged = true;
 				break;
 			case '(':
 				if (!merged) multiplyLists(lists);
+				lists.append(BlockStringList());
 				lists.append(BlockStringList() << BlockString());
 				merged = true;
 				break;
-			case ')':
-				if (!merged) multiplyLists(lists);
+			case ')': {
+				concatLists(lists,merged);
 				merged = false;
 				break;
+			}
+			case '|':{
+				concatLists(lists, merged);
+				lists.append(BlockStringList() << BlockString());
+				merged = true;
+				break;
 			//case ']': case '}': Q_ASSERT(false); return;
+			} 
 			case '>': Q_ASSERT(!specialCaseInsensitiveOperator); if (specialCaseInsensitiveOperator) return -1; //FALL THROUGH
 			case '<': if (specialCaseInsensitiveOperator) { //FALL THROUGH
 				if (!merged) multiplyLists(lists);
@@ -293,7 +312,7 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		multiplyLists(lists);
+		concatLists(lists,merged);
 
 		for (int i=0;i<lists.first().length();i++)
 			printPossibilities(lists.first()[i]);
