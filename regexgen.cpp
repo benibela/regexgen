@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 QMap<QChar, QString> characterClasses;
-const QString ALL_CHARACTERS = "0-9A-Za-z_+-.";
+QString ALL_CHARACTERS = "0-9A-Za-z_+-.";
 
 struct CharBlock {
 	//set on init
@@ -145,7 +145,7 @@ int main(int argc, char* argv[])
 	int INFINITY_PLUS = 5;
 	int INFINITY_STAR = 5;
 
-	const bool specialCaseInsensitiveOperator = true;
+	bool specialCaseInsensitiveOperator = true;
 
 	//character classes
 	characterClasses.insert('d', "0-9");
@@ -183,6 +183,7 @@ int main(int argc, char* argv[])
 	escapes.insert('f', "\x0C");
 	escapes.insert('v', "\x0B");
 
+	escapes.insert('b', ""); //word sepator (ignored)
 
 	for (int i = 1; i<argc;i++) {
 		QString arg = argv[i];
@@ -190,7 +191,22 @@ int main(int argc, char* argv[])
 		if (arg == "-inf" || arg == "-infinity") {
 			INFINITY_PLUS = QString(argv[++i]).toInt();
 			INFINITY_STAR = QString(argv[i]).toInt();
-		}  else  {
+		} else if (arg=="-all") {
+			ALL_CHARACTERS = QString(argv[++i]);
+		} else if (arg=="-case-insensitiveness"){
+			QString o = QString(argv[++i]);
+			if (o == "local") specialCaseInsensitiveOperator = true;
+			else if (o == "disable") specialCaseInsensitiveOperator = false;
+			else Q_ASSERT(false);
+		} else if (arg=="-words"){
+			QString o = QString(argv[++i]);
+			escapes.insert('w', o);
+			characterClasses.insert('w', o);
+		} else if (arg=="-digits"){
+			QString o = QString(argv[++i]);
+			escapes.insert('d', o);
+			characterClasses.insert('d', o);
+		} else  {
 			printf("RegEx-Solution-Generator\n");
 			printf("This program generates to a list of simple regexs all strings matching these regex\n");
 			printf("The syntax is pretty general, the only allowed expressions are:\n");
@@ -205,6 +221,12 @@ int main(int argc, char* argv[])
 			printf("(actually it could print an infinite number of strings to stdout, but quantifiers are expanded before printing)\n");
 			printf("^ and $ are ignored within the regex, but removed from start and end.\n");
 			printf("If you use nested optional brackets like (()?)? you may get duplicated strings.\n");
+			printf("Program options:\n");
+			printf("  --inf (replacement of infinity)\n");
+			printf("  --all (character range of .)\n");
+			printf("  --case-insensitiveness (local|disabled)\tdisable <..>\n");
+			printf("  --words (character range of \\w)\n");
+			printf("  --digits (character range of \\d)\n");
 			return 0;
 		}
 	}
@@ -213,7 +235,7 @@ int main(int argc, char* argv[])
 	while (!in.atEnd()) {
 		QString cur = in.readLine();
 		if (cur.startsWith("^")) cur = cur.mid(1);
-		else if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
+		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
 		QList< BlockStringList > lists;
 		bool merged = true;
@@ -242,10 +264,17 @@ int main(int argc, char* argv[])
 					i+=2;
 				} else Q_ASSERT(escapes.contains(cur[i]));
 				if (!merged) multiplyLists(lists);
-				lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
-				merged = false;
+				if (sub!="") {
+					lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
+					merged = false;
+				} else merged = true;
 				break;
 			}
+			case '.':
+				if (!merged) multiplyLists(lists);
+				lists.append(BlockStringList() << (BlockString() << createBlock(ALL_CHARACTERS)));
+				merged = false;
+				break;
 			case '?':
 				Q_ASSERT(!merged); //don't be lazy
 				multiplyLists(lists, 0, 1);
