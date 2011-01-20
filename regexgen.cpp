@@ -53,7 +53,7 @@ void printPossibilities(QList<CharBlock>& blocks){
 	}
 }
 
-void addToLists(QList< QList<CharBlock> > & lists, const QString& range){
+CharBlock createBlock(const QString& range){
 	CharBlock cb;
 //	qDebug("%s", qPrintable(range));
 	cb.type = range.length()<=1?CharBlock::CBT_FIXED:CharBlock::CBT_CHOOSE;
@@ -67,59 +67,76 @@ void addToLists(QList< QList<CharBlock> > & lists, const QString& range){
 		}
 	}
 
-	for (int i=0;i<lists.length();i++)
-		lists[i].append(cb);
+	return cb;
 }
 
-void multiplyLists(QList<QList<CharBlock> >& lists, int minRep, int maxRep){
-	QList<QList<CharBlock> > old = lists;
-	CharBlock last = old[0].last();
-	QList<CharBlock> add;
-	for (int r = 0; r < minRep; r++) add << last;
-	for (int i=0;i<old.length();i++)
-		old[i].removeLast();
-	lists.clear();
-	for (int r = minRep; r<=maxRep; r++) {
-		for (int i=0;i<old.length();i++){
-			lists.append(old[i]);
-			lists.last().append(add);
-		}
-		add << last;
+typedef QList<CharBlock> BlockString;
+typedef QList<BlockString> BlockStringList;
+
+void multiplyLists(QList<BlockStringList>& lists, int minRep = 1, int maxRep = 1){
+	if (minRep == 0 && maxRep == 0 || lists.size() == 1) return;
+
+	const BlockStringList& repeat = lists.takeLast();
+	BlockStringList old;
+	old = lists.takeLast();
+	BlockStringList nev;
+	BlockStringList result;
+	if (minRep == 0) result << old;
+	for (int r = 1; r <= maxRep;r++) {
+		nev.clear();
+		for (int i=0;i<old.length();i++)
+			for (int j=0;j<repeat.length();j++)
+				nev.append(BlockString() << old[i] << repeat[j]);
+		if (r >= minRep)
+			result << nev;
+		old = nev;
 	}
+	lists.append(result);
 }
 
 int main(int argc, char* argv[])
 {
+	const int INFINITY_PLUS = 5;
+	const int INFINITY_STAR = 5;
 	if (argc >= 2){
 		printf("RegEx-Solution-Generator\n");
 		printf("This program generates to a list of simple regexs all strings matching these regex\n");
-		printf("The syntax is very limited, the only allowed expressions are:\n");
+		printf("The syntax is pretty general, the only allowed expressions are:\n");
 		printf("  [character set]\n");
 		printf("  {min, max}\n");
 		printf("  ?   equivalent to {0,1}\n");
-		printf("  <case ignore>  this is not standard regex, but <xyz> will match XYZ case insensitive\n");
-		printf("Brackets and escape characters are currently not allowed and of course infinite operators like * + also not\n");
-		return;
+		printf("  +   equivalent to {1,INF}\n");
+		printf("  *   equivalent to {0,INF}\n");
+		printf("  <case ignore>  this is not standard regex, but <xyz> will match XYZ case insensitive.\n");
+		printf("INF is defined as 5, because no program can generate an infinite number of strings.\n");
+		printf("(actually it could print an infinite number of strings to stdout, but quantifiers are expanded before printing)\n");
+		printf("If you use nested optional brackets like (()?)? you may get duplicated strings.\n");
+		return 0;
 	}
 
 	QTextStream in(stdin);
+	bool merged = false;
 	while (!in.atEnd()) {
 		QString cur = in.readLine();
 
-		QList< QList<CharBlock> > lists;
-		lists << QList<CharBlock>();
+		QList< BlockStringList > lists;
+		lists << (BlockStringList() << BlockString());
 		for (int i=0;i<cur.length();i++){
 			switch (cur[i].toAscii()) {
 			case '[':{
+				if (!merged) multiplyLists(lists);
+
 				int n = cur.indexOf(']',i);
 				QString sub = cur.mid(i+1,n-1-i);
 				i = n;
 
-				addToLists(lists, sub);
+				lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
+				merged = false;
 				break;
 			}
 			case '?':
 				multiplyLists(lists, 0, 1);
+				merged = true;
 				break;
 			case '{': {
 				int n = cur.indexOf('}',i);
@@ -127,27 +144,50 @@ int main(int argc, char* argv[])
 				i = n;
 
 				QStringList temp = sub.split(',');
-				Q_ASSERT(temp.size()==2);
-				multiplyLists(lists, temp[0].toInt(), temp[1].toInt());
+				Q_ASSERT(temp.size()==2 || temp.size()==1);
+				multiplyLists(lists, temp.first().toInt(), temp.last().toInt());
+				merged = true;
 				break;
 			}
 			case '<': {
+				if (!merged) multiplyLists(lists);
+
 				int n = cur.indexOf('>',i);
 				QString sub = cur.mid(i+1,n-1-i);
 				i = n;
 
+				BlockString cbs;
 				for (int i=0;i<sub.length();i++)
-					addToLists(lists, QString(sub[i].toLower())+QString(sub[i].toUpper()));
+					cbs << createBlock(QString(sub[i].toLower())+QString(sub[i].toUpper()));
+				lists.append(BlockStringList() << cbs);
+				merged = false;
 				break;
 			}
+			case '+': multiplyLists(lists, 1, INFINITY_PLUS); break;
+			case '*': multiplyLists(lists, 0, INFINITY_STAR); break;
+			case '(':
+				if (!merged) multiplyLists(lists);
+				lists.append(BlockStringList() << BlockString());
+				merged = true;
+				break;
+			case ')':
+				if (!merged) multiplyLists(lists);
+				merged = false;
+				break;
 			case ']': case '}': case '>': Q_ASSERT(false);
 			default:
-				addToLists(lists, ""+cur[i]);
+				if (!merged) multiplyLists(lists);
+				lists.append(BlockStringList() << (BlockString() << createBlock(""+cur[i])));
+				merged = false;
 			}
 		}
 
-		for (int i=0;i<lists.length();i++)
-			printPossibilities(lists[i]);
+		multiplyLists(lists);
+
+		for (int i=0;i<lists.first().length();i++)
+			printPossibilities(lists.first()[i]);
+
+		Q_ASSERT(lists.size()==1);
 	}
 	return 0;
 }
