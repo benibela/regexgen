@@ -3,9 +3,9 @@
 #include <QStringList>
 #include <QMap>
 #include <stdio.h>
-
+#include <stdlib.h>
 QMap<QChar, QString> characterClasses;
-QString ALL_CHARACTERS = "0-9A-Za-z_+-.";
+QString ALL_CHARACTERS = "0-9A-Za-z_+-*/=<>()[]{}!.,;:$%\"'#~";
 
 struct CharBlock {
 	//set on init
@@ -21,7 +21,15 @@ struct CharBlock {
 
 };
 
-void printPossibilities(QList<CharBlock>& blocks){
+int randUntil(int until){
+	return random() % until;
+}
+
+char charConv(const QChar& c){
+	return c.toAscii();
+}
+
+void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines){
 	char word[blocks.length()+1];
 	CharBlock vars[blocks.size()+1];
 	int actualBlockCount = 0;
@@ -38,22 +46,39 @@ void printPossibilities(QList<CharBlock>& blocks){
 //		printf(">%s<\n",vars[i].data);
 	word[blocks.length()]=0;
 	if (actualBlockCount==0) {printf("%s\n", word); return;}
-	while (true) {
-		int i=0;
-		for (;i<actualBlockCount && vars[i].choosen == vars[i].len;  i++) {
-			vars[i].choosen = 0;
-			word[vars[i].pos] = *vars[i].data;
-			vars[i+1].choosen++;
+
+	if (!randomized) {
+		int r = 0;
+		while (true) {
+			int i=0;
+			for (;i<actualBlockCount && vars[i].choosen == vars[i].len;  i++) {
+				vars[i].choosen = 0;
+				word[vars[i].pos] = *vars[i].data;
+				vars[i+1].choosen++;
+			}
+			if (i<actualBlockCount) {
+				word[vars[i].pos] = vars[i].data[vars[i].choosen];
+				printf("%s\n", word);
+				r++;
+				if (maxLines > 0 && r>=maxLines) break;
+			} else {
+	//			printf("%s\n", word);
+				break;
+			}
+			vars[0].choosen+=1;
+			word[vars[0].pos] = vars[0].data[vars[0].choosen];
 		}
-		if (i<actualBlockCount) {
-			word[vars[i].pos] = vars[i].data[vars[i].choosen];
+	} else {
+		if (maxLines < 0) {
+			maxLines = 1;
+			for (int i=0;i<actualBlockCount;i++)
+				maxLines*=vars[i].len;
+		}
+		for (int r=0;r<maxLines;r++) {
+			for (int i=0;i<actualBlockCount;i++)
+				word[vars[i].pos] = vars[i].slowData[randUntil(vars[i].len)];
 			printf("%s\n", word);
-		} else {
-//			printf("%s\n", word);
-			break;
 		}
-		vars[0].choosen+=1;
-		word[vars[0].pos] = vars[0].data[vars[0].choosen];
 	}
 }
 
@@ -69,12 +94,18 @@ QByteArray convertRange(const QString& temp){
 	return res;
 }
 
+QByteArray invertCharset(const QString& charset){
+	QByteArray t = convertRange(ALL_CHARACTERS);
+	foreach (const QChar& c, charset) t.replace(c,"");
+	return t;
+}
+
 CharBlock createBlock(const QString& range){
 	CharBlock cb;
 //	qDebug("%s", qPrintable(range));
 	if (range.length()==1) {
 		cb.type = CharBlock::CBT_FIXED;
-		cb.slowData = range.toAscii();
+		cb.slowData = range.toLatin1();
 	} else {
 		cb.type = CharBlock::CBT_CHOOSE;
 		for (int i=(range.startsWith('^')?1:0);i<range.length();i++) {
@@ -89,19 +120,16 @@ CharBlock createBlock(const QString& range){
 					const QString& temp = characterClasses.value(range[i]); //nested character class
 					cb.slowData += convertRange(temp);
 				}
-			} else if (range[i] != '-' || i == 0) cb.slowData += range[i];
+			} else if (range[i] != '-' || i == 0) cb.slowData += charConv(range[i]);
 			else {
 				i++;
-				while (cb.slowData.at(cb.slowData.length()-1) < range[i])
-					cb.slowData += QChar(cb.slowData[cb.slowData.length()-1] + 1);
+				while (cb.slowData.at(cb.slowData.length()-1) < charConv(range[i]))
+					cb.slowData += (cb.slowData[cb.slowData.length()-1] + 1);
 			}
 		}
 
-		if (range.startsWith("^")) {
-			QByteArray t = convertRange(ALL_CHARACTERS);
-			foreach (const QChar& c, cb.slowData) t.replace(c,"");
-			cb.slowData = t;
-		}
+		if (range.startsWith("^"))
+			cb.slowData = invertCharset(cb.slowData);
 	}
 	return cb;
 }
@@ -146,6 +174,9 @@ int main(int argc, char* argv[])
 	int INFINITY_STAR = 5;
 
 	bool specialCaseInsensitiveOperator = true;
+	bool expandOnly = false;
+	int maxExpandLines = -1;
+	bool chooseRandomized = false;
 
 	//character classes
 	characterClasses.insert('d', "0-9");
@@ -206,10 +237,13 @@ int main(int argc, char* argv[])
 			QString o = QString(argv[++i]);
 			escapes.insert('d', o);
 			characterClasses.insert('d', o);
-		} else  {
+		} else if (arg=="-reduce-to-charsets") expandOnly = true;
+		else if (arg=="-choose-randomized") chooseRandomized = true;
+		else if (arg=="-max-expand-lines") maxExpandLines=QString(argv[++i]).toInt();
+		else  {
 			printf("RegEx-Solution-Generator\n");
 			printf("This program generates to a list of simple regexs all strings matching these regex\n");
-			printf("The syntax is pretty general, the only allowed expressions are:\n");
+			printf("The syntax is pretty general, the allowed expressions are:\n");
 			printf("  [character set]\n");
 			printf("  {min, max}\n");
 			printf("  ?   equivalent to {0,1}\n");
@@ -218,18 +252,28 @@ int main(int argc, char* argv[])
 			printf("  .   equivalent to [ALL] = [0-9A-Za-z_+-...]\n");
 			printf("  <case ignore>  this is not standard regex, but <xyz> will match XYZ case insensitive.\n");
 			printf("INF is defined as 5, because no program can generate an infinite number of strings.\n");
-			printf("(actually it could print an infinite number of strings to stdout, but quantifiers are expanded before printing)\n");
+			printf("(actually it could print an infinite number of strings to stdout, but quantifiers are expanded before printing in the current implementation)\n");
 			printf("^ and $ are ignored within the regex, but removed from start and end.\n");
 			printf("If you use nested optional brackets like (()?)? you may get duplicated strings.\n");
 			printf("Program options:\n");
-			printf("  --inf (replacement of infinity)\n");
-			printf("  --all (character range of .)\n");
-			printf("  --case-insensitiveness (local|disabled)\tdisable <..>\n");
-			printf("  --words (character range of \\w)\n");
-			printf("  --digits (character range of \\d)\n");
+			printf("  --inf \"replacement of infinity\"\n");
+			printf("  --all \"character range of .)\n");
+			printf("  --case-insensitiveness \"local|disabled\"\tdisable <..>\n");
+			printf("  --words \"character range of \\w\"\n");
+			printf("  --digits \"character range of \\d\"\n");
+			printf("  --reduce-to-charsets\tGenerate a set of regex limited to charsets that match the same strings as the original regex\n");
+			printf("  --choose-randomized\tDon't print all possible matches in a systematic way, but choose random ones\n");
+			printf("  --max-expand-lines \"max matches printed foreach charset regex\"\n");
 			return 0;
 		}
 	}
+
+	characterClasses.insert('D', invertCharset(convertRange(characterClasses.value('d'))));
+	characterClasses.insert('W', invertCharset(convertRange(characterClasses.value('w'))));
+	characterClasses.insert('S', invertCharset(convertRange(characterClasses.value('s'))));
+	escapes.insert('D', characterClasses.value('D'));
+	escapes.insert('W', characterClasses.value('W'));
+	escapes.insert('S', characterClasses.value('S'));
 
 	QTextStream in(stdin);
 	while (!in.atEnd()) {
@@ -343,8 +387,20 @@ int main(int argc, char* argv[])
 
 		concatLists(lists,merged);
 
-		for (int i=0;i<lists.first().length();i++)
-			printPossibilities(lists.first()[i]);
+		if (expandOnly) {
+			for (int i=0;i<lists.first().length();i++) {
+				const BlockString& bs = lists.first()[i];
+				foreach (const CharBlock& cb, bs)
+					if (cb.type == CharBlock::CBT_FIXED)
+						printf("%c", cb.slowData[0]);
+					else if (cb.type == CharBlock::CBT_CHOOSE)
+						printf("[%s]", qPrintable(QString(cb.slowData).replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")));
+					else
+						break;
+				printf("\n");
+			}
+		} else for (int i=0;i<lists.first().length();i++)
+			printPossibilities(lists.first()[i],chooseRandomized,maxExpandLines);
 
 		Q_ASSERT(lists.size()==1);
 	}
