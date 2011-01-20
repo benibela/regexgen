@@ -29,6 +29,8 @@ char charConv(const QChar& c){
 	return c.toAscii();
 }
 
+//takes a simplified like (\[.*\]|.)* and prints all possibilities to choose characters in the character sets
+//(this will generate thousand-millions of equal-length words)
 void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines){
 	char word[blocks.length()+1];
 	CharBlock vars[blocks.size()+1];
@@ -82,6 +84,8 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 	}
 }
 
+//expands a simplified [...] range to a list of all character matched by it
+//(simplified: no ^, no \, but -; not actually used for the ranges in an input regex but to define \d=[...])
 QByteArray convertRange(const QString& temp){
 	QByteArray res;
 	for (int j=0;j<temp.length();j++)
@@ -94,12 +98,14 @@ QByteArray convertRange(const QString& temp){
 	return res;
 }
 
+//removes all chars in charset from the char universe
 QByteArray invertCharset(const QString& charset){
 	QByteArray t = convertRange(ALL_CHARACTERS);
 	foreach (const QChar& c, charset) t.replace(c,"");
 	return t;
 }
 
+//creates a block for a [..] range
 CharBlock createBlock(const QString& range){
 	CharBlock cb;
 //	qDebug("%s", qPrintable(range));
@@ -138,7 +144,7 @@ typedef QList<CharBlock> BlockString;
 typedef QList<BlockString> BlockStringList;
 
 
-
+//add all strings from lists[-1] to list[-2], repeated between minRep and maxRep times; reduces list.size by 2 and increase by maxRep-minRep+1
 void multiplyLists(QList<BlockStringList>& lists, int minRep = 1, int maxRep = 1){
 	if (minRep == 0 && maxRep == 0 || lists.size() == 1) return;
 
@@ -169,7 +175,7 @@ void concatLists(QList<BlockStringList>& lists, bool merged) {
 
 int main(int argc, char* argv[])
 {
-	//Parameters (above are some more)
+	//============Parameters (above are some more)===========
 	int INFINITY_PLUS = 5;
 	int INFINITY_STAR = 5;
 
@@ -275,14 +281,23 @@ int main(int argc, char* argv[])
 	escapes.insert('W', characterClasses.value('W'));
 	escapes.insert('S', characterClasses.value('S'));
 
+
+	//========================Actual RegExp Processing=======================
 	QTextStream in(stdin);
 	while (!in.atEnd()) {
 		QString cur = in.readLine();
 		if (cur.startsWith("^")) cur = cur.mid(1);
 		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
-		QList< BlockStringList > lists;
 		bool merged = true;
+		//Stack of (block-)stringlists
+		//Each stringlist contains all possible block match for a subterm of the regex (brackets or enums)
+		//Everything except charsets is expanded
+		//Lists can be added => Append all strings of list[-2] to list[-1]
+		//And multiplied => Replace list[-2] by all concatenated pairs of list[-1] and list[-2]
+		//Only | causes addition, everything else causes multiplication
+		//The stack will look like this: (+list) (*list) (+list) (*list) ... (+list) (*list) (temporary list)
+		QList< BlockStringList > lists;
 		lists << (BlockStringList()) << (BlockStringList() << BlockString());
 
 		for (int i=0;i<cur.length();i++){
