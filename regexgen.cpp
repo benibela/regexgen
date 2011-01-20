@@ -2,6 +2,7 @@
 #include <QString>
 #include <QStringList>
 #include <QMap>
+#include <QTextCodec>
 #include <stdio.h>
 #include <stdlib.h>
 QMap<QChar, QString> characterClasses;
@@ -221,6 +222,10 @@ int main(int argc, char* argv[])
 	escapes.insert('v', "\x0B");
 
 	escapes.insert('b', ""); //word sepator (ignored)
+	escapes.insert('B', ""); //word sepator (ignored)
+	escapes.insert('A', ""); //marker (ignored)
+	escapes.insert('Z', ""); //marker (ignored)
+	escapes.insert('z', ""); //marker f(ignored)
 
 	for (int i = 1; i<argc;i++) {
 		QString arg = argv[i];
@@ -284,8 +289,17 @@ int main(int argc, char* argv[])
 
 	//========================Actual RegExp Processing=======================
 	QTextStream in(stdin);
-	while (!in.atEnd()) {
+	//in.setCodec(QTextCodec::codecForLocale());
+#ifndef Q_WS_WIN32
+	in.setCodec("utf-8");
+#endif
+	while (true) {
 		QString cur = in.readLine();
+		if (cur.isNull()) break;
+		//printf(">%s<ü\n",cur.toUtf8().data());
+		//printf("%i:",cur.length());
+		//for (int i=0;i<cur.length();i++)
+		//	printf("%u-", (256+charConv(cur[i])*1) % 256);
 		if (cur.startsWith("^")) cur = cur.mid(1);
 		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
@@ -321,6 +335,15 @@ int main(int argc, char* argv[])
 					Q_ASSERT(cur[i+1].toLatin1() >= '0' && cur[i+1].toLatin1() <= '9');
 					Q_ASSERT(cur[i+2].toLatin1() >= '0' && cur[i+2].toLatin1() <= '9');
 					i+=2;
+				} else if (cur[i] == 'Q') { //  \Q ... \E literal quotation
+					if (!merged) multiplyLists(lists);
+					BlockString temp;
+					for (i++; cur[i] != '\\' || cur[i+1] != 'E'; i++)
+						temp << createBlock(""+cur[i]);
+					i++;
+					lists.append(BlockStringList() << temp);
+					merged=false;
+					break;
 				} else Q_ASSERT(escapes.contains(cur[i]));
 				if (!merged) multiplyLists(lists);
 				if (sub!="") {
@@ -335,7 +358,8 @@ int main(int argc, char* argv[])
 				merged = false;
 				break;
 			case '?':
-				Q_ASSERT(!merged); //don't be lazy
+				if (merged) break; //ignore lazy
+				//Q_ASSERT(!merged); //don't be lazy
 				multiplyLists(lists, 0, 1);
 				merged = true;
 				break;
