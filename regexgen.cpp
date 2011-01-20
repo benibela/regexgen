@@ -85,7 +85,7 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 QByteArray convertRange(const QString& temp){
 	QByteArray res;
 	for (int j=0;j<temp.length();j++)
-		if (temp[j] != '-') res += temp[j];
+		if (temp[j] != '-' || j==0) res += temp[j];
 		else {
 			j++;
 			while (res.at(res.length()-1) < temp[j])
