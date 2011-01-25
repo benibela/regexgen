@@ -31,6 +31,17 @@ char charConv(const QChar& c){
 	return c.toAscii();
 }
 
+int hexToInt(const char c){
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+  if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+  throw "invalid character";
+}
+unsigned char hexCharacter(const QChar& c1, const QChar& c2){
+fprintf(stderr, qPrintable(QString(">%1,%2<\n").arg(c1).arg(c2)));
+	return (hexToInt(c1.toLatin1()) << 4) + hexToInt(c2.toLatin1());
+}
+
 //takes a simplified like (\[.*\]|.)* and prints all possibilities to choose characters in the character sets
 //(this will generate thousand-millions of equal-length words)
 void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines){
@@ -115,6 +126,20 @@ QByteArray invertCharset(const QString& charset){
 	return t;
 }
 
+QByteArray decodeEscape(const QString& range, int& i){
+	Q_ASSERT(range[i] == '\\');
+	if (range[++i] == 'x') {
+		QByteArray temp; 
+		temp += hexCharacter(range[i+1], range[i+2]);
+		i+=2;
+		return temp;
+	} else {
+		Q_ASSERT(characterClasses.contains(range[i]));
+		const QString& temp = characterClasses.value(range[i]); //nested character class
+		return convertRange(temp);
+	}
+}
+
 //creates a block for a [..] range
 CharBlock createBlock(const QString& range){
 	Q_ASSERT(range.length() > 0);
@@ -126,22 +151,20 @@ CharBlock createBlock(const QString& range){
 	} else {
 		cb.type = CharBlock::CBT_CHOOSE;
 		for (int i=(range.startsWith('^')?1:0);i<range.length();i++) {
-			if (range[i] == '\\') {
-				if (range[++i] == 'x') {
-					cb.slowData += '\0' + 16*(range[i+1].toLatin1()-'0') + (range[i+2].toLatin1()-'0');
-					Q_ASSERT(range[i+1].toLatin1() >= '0' && range[i+1].toLatin1() <= '9');
-					Q_ASSERT(range[i+2].toLatin1() >= '0' && range[i+2].toLatin1() <= '9');
-					i+=2;
-				} else {
-					Q_ASSERT(characterClasses.contains(range[i]));
-					const QString& temp = characterClasses.value(range[i]); //nested character class
-					cb.slowData += convertRange(temp);
-				}
-			} else if (range[i] != '-' || i == 0) cb.slowData += charConv(range[i]);
+			if (range[i] == '\\') cb.slowData += decodeEscape(range, i);
+			else if (range[i] != '-' || i == 0) cb.slowData += charConv(range[i]);
 			else {
 				i++;
-				while (cb.slowData.at(cb.slowData.length()-1) < charConv(range[i]))
+				unsigned char lookAhead = charConv(range[i]);
+				QByteArray temp;
+				if (lookAhead == '\\') {
+					temp=decodeEscape(range, i);
+					lookAhead = temp[0];
+					temp.remove(0,1);
+				}
+				while ((unsigned char)(cb.slowData.at(cb.slowData.length()-1)) < lookAhead)
 					cb.slowData += (cb.slowData[cb.slowData.length()-1] + 1);
+				cb.slowData += temp;
 			}
 		}
 
@@ -346,9 +369,7 @@ int main(int argc, char* argv[])
 			case '\\':{
 				QString sub = escapes.value(cur[++i]);
 				if (cur[i].toAscii() == 'x') {
-					sub = '\0' + 16*(cur[i+1].toLatin1()-'0') + (cur[i+2].toLatin1()-'0');
-					Q_ASSERT(cur[i+1].toLatin1() >= '0' && cur[i+1].toLatin1() <= '9');
-					Q_ASSERT(cur[i+2].toLatin1() >= '0' && cur[i+2].toLatin1() <= '9');
+					sub = hexCharacter(cur[i+1], cur[i+2]);
 					i+=2;
 				} else if (cur[i] == 'Q') { //  \Q ... \E literal quotation
 					if (!merged) multiplyLists(lists);
