@@ -2,18 +2,25 @@
 #include <QString>
 #include <QStringList>
 #include <QMap>
+#include <QVector>
 #include <QTextCodec>
 #include <stdio.h>
 #include <stdlib.h>
+
+#define likely(x)       __builtin_expect(!!(x), 1)
+#define unlikely(x)     __builtin_expect(!!(x), 0)
+
+
 QMap<QChar, QString> characterClasses;
 QString ALL_CHARACTERS = "0-9A-Za-z_+-*/=<>()[]{}!.,;:$%\"'#~";
 bool printProgress = false;
 
 struct CharBlock {
 	//set on init
-	enum Type {CBT_FIXED, CBT_CHOOSE};
+	enum Type {CBT_FIXED, CBT_CHOOSE, CBT_BACKTRACK_START, CBT_BACKTRACK_END, CBT_BACKTRACK};
 	Type type;
 	QByteArray slowData;
+	int backtrack;
 
 	//set when evaluating
 	const char * data;
@@ -22,6 +29,10 @@ struct CharBlock {
 	int pos;
 
 };
+//typedef QList<CharBlock> BlockString;
+//typedef QList<BlockString> BlockStringList;
+#define BlockString QList< CharBlock >
+#define BlockStringList QList< BlockString >
 
 int randUntil(int until){
 	return random() % until;
@@ -42,28 +53,198 @@ fprintf(stderr, qPrintable(QString(">%1,%2<\n").arg(c1).arg(c2)));
 	return (hexToInt(c1.toLatin1()) << 4) + hexToInt(c2.toLatin1());
 }
 
+void removePoint(int pos, QList<int>& points){
+	for (int i = 0; i < points.size(); i++)
+		if (points[i] > pos)
+			points[i]--;
+}
+void insertPoint(int pos, int len, QList<int>& points){
+	if (len == 0) return;
+	for (int i = 0; i < points.size(); i++)
+		if (points[i] > pos)
+			points[i]+=len;
+}
+
+//Replace all backtrack references to bracket pairs by references to one certain character
+BlockString purifyBacktracking(const BlockString& strin){
+	//--Remove all ids of brackets not referenced by references--
+	BlockString str = strin;
+	QList<int> accessedMatches;
+	for (int i=str.size()-1;i >= 0;i--)
+		if (str[i].type == CharBlock::CBT_BACKTRACK && !accessedMatches.contains(str[i].backtrack))
+			accessedMatches << str[i].backtrack;
+	if (accessedMatches.isEmpty()) {
+		for (int i=str.size()-1;i >= 0;i--)
+			if (str[i].type == CharBlock::CBT_BACKTRACK_START || str[i].type == CharBlock::CBT_BACKTRACK_END)
+				str.removeAt(i);
+		return str; //optimized case, no back tracking used
+	}
+	for (int i=str.size()-1;i>=0;i--)
+		if (str[i].type == CharBlock::CBT_BACKTRACK_START || str[i].type == CharBlock::CBT_BACKTRACK_END)
+			if (!accessedMatches.contains( str[i].backtrack ) )
+				str.removeAt(i);
+	//--map remaining ids to [0,n]--
+	QMap<int, int> btMap;
+	foreach (int i, accessedMatches)
+		btMap.insert(i, btMap.size());
+	//--calculate string intervals--
+	QList<int> btStart, btEnd;
+	for (int i=0;i<accessedMatches.size();i++) btStart << -1;
+	for (int i=0;i<accessedMatches.size();i++) btEnd << -1;
+	for (int i=str.size()-1;i>=0;i--)
+		if (str[i].type == CharBlock::CBT_BACKTRACK_START || str[i].type == CharBlock::CBT_BACKTRACK_END) {
+			int rid = btMap.value(str[i].backtrack);			
+			if (str[i].type == CharBlock::CBT_BACKTRACK_START && btStart[rid] == -1 )
+				btStart[rid] = i;
+			else if (btEnd[rid] == -1)
+				btEnd[rid] = i;
+		}
+
+	if (btStart.contains(-1) || btEnd.contains(-1)) throw "invalid backtrack index";
+	//remove now useless bracket-ids
+	for (int i=str.size()-1;i>=0;i--)
+		if (str[i].type == CharBlock::CBT_BACKTRACK_START || str[i].type == CharBlock::CBT_BACKTRACK_END) {
+			removePoint(i, btStart);
+			removePoint(i, btEnd);
+			str.removeAt(i);
+		}
+	//--expand all \i backtrack references to the size of the i-th match--
+	//remap
+	for (int i=0;i<str.size();i++)
+		if (str[i].type == CharBlock::CBT_BACKTRACK)
+			str[i].backtrack = btMap.value(str[i].backtrack);
+	QVector<bool> done;
+	done.resize(accessedMatches.size());
+	//topological sort
+	//if a bracket referenced by a backtracking reference contains another reference, latter reference must be expaned first
+	for (int i=0;i<accessedMatches.size();i++) {
+		if (done[i]) continue;
+		QList<int> stack;
+		QList<int> processing;
+		stack.append(i);
+		while (!stack.isEmpty()) {
+			int c = stack.last();
+			done[c] = true;
+			processing << c;
+			QList<int> higherPrio;
+			for (int j=btStart[c]; j < btEnd[c]; j++)
+				if (str[j].type == CharBlock::CBT_BACKTRACK && str[j].backtrack >= 0)
+					if (!higherPrio.contains(str[j].backtrack) && !done[str[j].backtrack]) {
+						if (processing.contains(str[j].backtrack)) throw "Recursive backtrack reference";
+						higherPrio << str[j].backtrack;
+					}
+			if (!higherPrio.isEmpty()) {
+				foreach (int j, higherPrio) {
+					stack << j;
+				}
+			} else {
+				stack.removeLast();
+				processing.removeLast();
+				//copy reference until we have one reference per character
+				for (int j=btEnd[c]-1; j >= btStart[c]; j--){
+					if (str[j].type == CharBlock::CBT_BACKTRACK && str[j].backtrack >= 0) {
+						int l = btEnd[str[j].backtrack] - btStart[str[j].backtrack];
+						if (l==0) {
+							removePoint(i, btStart);
+							removePoint(i, btEnd);
+							str.removeAt(i);
+						} else {
+							insertPoint(j, l-1, btStart);
+							insertPoint(j, l-1, btEnd);
+							str[j].backtrack = - str[j].backtrack - 1; //invert backtrack id to mark processed references
+							for (int k=1;k<l;k++) str.insert(j, str[j]);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	//copy reference until we have one reference per character (for references not in brackets)
+	for (int j=str.length()-1; j >= 0; j--){
+		if (str[j].type == CharBlock::CBT_BACKTRACK && str[j].backtrack >= 0) {
+			int l = btEnd[str[j].backtrack] - btStart[str[j].backtrack];
+			if (l==0) {
+				removePoint(j, btStart);
+				removePoint(j, btEnd);
+				str.removeAt(j);
+			} else {
+				insertPoint(j, l-1, btStart);
+				insertPoint(j, l-1, btEnd);
+				str[j].backtrack = - str[j].backtrack - 1; //invert backtrack id to mark processed references
+				for (int k=1;k<l;k++) str.insert(j, str[j]);
+			}
+		}
+	}
+
+
+	//now all backtrack references have the right length => replace backtrack by character index
+	for (int i=0; i<str.length(); i++)
+		if (str[i].type == CharBlock::CBT_BACKTRACK) {
+			Q_ASSERT(str[i].backtrack < 0); //already processed
+			int bt = -str[i].backtrack - 1;
+			int l = btEnd[bt] - btStart[bt];
+			for (int j=0;j<l;j++, i++) {
+				Q_ASSERT(-str[i].backtrack - 1 == bt);
+				str[i].backtrack = btStart[bt]+j;
+			}
+			i--;
+		}
+
+	//remove reference chains
+	for (int i=0; i<str.length(); i++)
+		if (str[i].type == CharBlock::CBT_BACKTRACK) {
+			QList<int> cycleKill;
+			int j = str[i].backtrack;
+			while (str[j].type == CharBlock::CBT_BACKTRACK) {
+				Q_ASSERT(!cycleKill.contains(j));
+				cycleKill << j;
+				j = str[j].backtrack;
+			}
+			str[i].backtrack = j;
+		}
+
+	return str;
+}
+
 //takes a simplified like (\[.*\]|.)* and prints all possibilities to choose characters in the character sets
 //(this will generate thousand-millions of equal-length words)
 void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines){
 	char word[blocks.length()+1];
 	CharBlock vars[blocks.size()+1];
+	CharBlock bts[blocks.size()+1];
 	int actualBlockCount = 0;
+	int actualBackTrackCount = 0;
 	long int totalPos = 1;
 	for (int i=0;i<blocks.size();i++){
 		blocks[i].pos = i;
-		blocks[i].choosen = 0;
-		blocks[i].len = blocks[i].slowData.length();
-		blocks[i].data = blocks[i].slowData.data(); //QByteArray::data keeps the data in memory (in contrast to QString::toAscii and qPrintable which DON'T WORK HERE)
-		word[i] = *blocks[i].data;
-		totalPos*=blocks[i].len;
-		Q_ASSERT(blocks[i].len > 0);
-		if (blocks[i].type == CharBlock::CBT_FIXED) Q_ASSERT(blocks[i].len==1);
-		else vars[actualBlockCount++] = blocks[i];
+		switch (blocks[i].type){
+		case CharBlock::CBT_FIXED: case CharBlock::CBT_CHOOSE:
+			blocks[i].choosen = 0;
+			blocks[i].len = blocks[i].slowData.length();
+			blocks[i].data = blocks[i].slowData.data(); //QByteArray::data keeps the data in memory (in contrast to QString::toAscii and qPrintable which DON'T WORK HERE)
+			word[i] = *blocks[i].data;
+			totalPos*=blocks[i].len;
+			Q_ASSERT(blocks[i].len > 0);
+			if (blocks[i].type == CharBlock::CBT_FIXED) Q_ASSERT(blocks[i].len==1);
+			else vars[actualBlockCount++] = blocks[i];
+			break;
+		case CharBlock::CBT_BACKTRACK:
+			bts[actualBackTrackCount++] = blocks[i];
+			break;
+		default: Q_ASSERT(false);
+		}
+
 	}
 //	for (int i=0;i<actualBlockCount;i++)
 //		printf(">%s<\n",vars[i].data);
 	word[blocks.length()]=0;
-	if (actualBlockCount==0) {printf("%s\n", word); return;}
+	if (actualBlockCount==0) {
+		if (unlikely(actualBackTrackCount)) for (int j=0;j<actualBackTrackCount;j++)
+			word[bts[j].pos] = word[bts[j].backtrack];
+		printf("%s\n", word);
+		return;
+	}
 
 	if (maxLines > 0) totalPos = maxLines;
 	int progressNext = printProgress?totalPos / 10:totalPos;
@@ -77,11 +258,13 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 				word[vars[i].pos] = *vars[i].data;
 				vars[i+1].choosen++;
 			}
-			if (i<actualBlockCount) {
+			if (likely(i<actualBlockCount)) {
 				word[vars[i].pos] = vars[i].data[vars[i].choosen];
+				if (unlikely(actualBackTrackCount)) for (int j=0;j<actualBackTrackCount;j++)
+					word[bts[j].pos] = word[bts[j].backtrack];
 				printf("%s\n", word);
 				r++;
-				if (r>=progressNext) {
+				if (unlikely(r>=progressNext)) {
 					if (printProgress) {
 						fprintf(stderr, "      Progress: %i/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
 						progressNext = qMin(totalPos, progressNext + totalPos/10);
@@ -100,9 +283,30 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 		for (int r=0;r<maxLines;r++) {
 			for (int i=0;i<actualBlockCount;i++)
 				word[vars[i].pos] = vars[i].slowData[randUntil(vars[i].len)];
+			if (unlikely(actualBackTrackCount)) for (int j=0;j<actualBackTrackCount;j++)
+				word[bts[j].pos] = word[bts[j].backtrack];
 			printf("%s\n", word);
 		}
 	}
+}
+
+void printExpanded(const BlockString& bs) {
+	bool bt = false;
+	foreach (const CharBlock& cb, bs)
+		if (cb.type == CharBlock::CBT_BACKTRACK)
+			bt = true;
+	const char * bo = bt?"(":"";
+	const char * bc = bt?")":"";
+	foreach (const CharBlock& cb, bs)
+		if (cb.type == CharBlock::CBT_FIXED)
+			printf("%s%c%s", bo, cb.slowData[0], bc);
+		else if (cb.type == CharBlock::CBT_CHOOSE)
+			printf("%s[%s]%s", bo, qPrintable(QString(cb.slowData).replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")), bc);
+		else if (cb.type == CharBlock::CBT_BACKTRACK)
+			printf("%s\\%i%s", bo, cb.backtrack+1, bc);
+		else
+			continue;
+	printf("\n");
 }
 
 //expands a simplified [...] range to a list of all character matched by it
@@ -154,7 +358,7 @@ CharBlock createBlock(const QString& range){
 			if (range[i] == '\\') cb.slowData += decodeEscape(range, i);
 			else if (range[i] != '-' || i == 0) cb.slowData += charConv(range[i]);
 			else {
-				i++;
+				i++;float x=3.;
 				unsigned char lookAhead = charConv(range[i]);
 				QByteArray temp;
 				if (lookAhead == '\\') {
@@ -174,8 +378,6 @@ CharBlock createBlock(const QString& range){
 	return cb;
 }
 
-typedef QList<CharBlock> BlockString;
-typedef QList<BlockString> BlockStringList;
 
 
 //add all strings from lists[-1] to list[-2], repeated between minRep and maxRep times; reduces list.size by 2 and increase by maxRep-minRep+1
@@ -206,6 +408,18 @@ void concatLists(QList<BlockStringList>& lists, bool merged) {
 	lists.last().append(enums);
 }
 
+/*
+  Regex-Match Generator
+
+  It processes a given regex in three steps:
+  1. Expand all ? {} + * | operators
+     This create a few new regex each matching strings of fixed length
+  2. Expand all backtracking operators
+     Afterwards each character in the string is either a link to another
+     or a character set
+  3. Expand all character sets
+
+*/
 
 int main(int argc, char* argv[])
 {
@@ -329,6 +543,7 @@ int main(int argc, char* argv[])
 	in.setCodec("utf-8");
 #endif
 	int loopCount = 0;
+	try{
 	while (true) {
 		QString cur = in.readLine();
 		if (cur.isNull()) break;
@@ -340,6 +555,8 @@ int main(int argc, char* argv[])
 		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
 		bool merged = true;
+		int nestingLevel = 0;
+		QList<int> nestedBrackets;
 		loopCount++;
 		if (printProgress) fprintf(stderr, "Processing regex %i: %s\n", loopCount, qPrintable(cur));
 		//Stack of (block-)stringlists
@@ -367,12 +584,27 @@ int main(int argc, char* argv[])
 				break;
 			}
 			case '\\':{
-				QString sub = escapes.value(cur[++i]);
+				if (!merged) multiplyLists(lists);
+				merged = true;
+				QString sub;
+				i++;
 				if (cur[i].toAscii() == 'x') {
 					sub = hexCharacter(cur[i+1], cur[i+2]);
 					i+=2;
+				} else if (cur[i] >= '0' && cur[i] <= '9'){
+					int bt = cur[i].toLatin1() - '0';
+					if (i+1 < cur.length() && cur[i+1] >= '0' && cur[i+1] <= '9'){
+						bt*=10;
+						bt += cur[i+1].toLatin1() - '0';
+						i++;
+					}
+					CharBlock cb;
+					cb.type = CharBlock::CBT_BACKTRACK;
+					cb.backtrack = bt;
+					lists.append(BlockStringList() << (BlockString() << cb));
+					merged = false;
+					break;
 				} else if (cur[i] == 'Q') { //  \Q ... \E literal quotation
-					if (!merged) multiplyLists(lists);
 					BlockString temp;
 					for (i++; cur[i] != '\\' || cur[i+1] != 'E'; i++)
 						temp << createBlock(""+cur[i]);
@@ -380,12 +612,14 @@ int main(int argc, char* argv[])
 					lists.append(BlockStringList() << temp);
 					merged=false;
 					break;
-				} else Q_ASSERT(escapes.contains(cur[i]));
-				if (!merged) multiplyLists(lists);
-				if (sub!="") {
-					lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
-					merged = false;
-				} else merged = true;
+				} else {
+					Q_ASSERT(escapes.contains(cur[i]));
+					sub =  escapes.value(cur[i]);
+					if (sub.isEmpty())
+						break;
+				}
+				lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
+				merged = false;
 				break;
 			}
 			case '.':
@@ -420,14 +654,27 @@ int main(int argc, char* argv[])
 				multiplyLists(lists, 0, INFINITY_STAR);
 				merged = true;
 				break;
-			case '(':
+			case '(':{
 				if (!merged) multiplyLists(lists);
 				lists.append(BlockStringList());
 				lists.append(BlockStringList() << BlockString());
+				nestingLevel++;
+				nestedBrackets << nestingLevel;
+				CharBlock cb;
+				cb.type = CharBlock::CBT_BACKTRACK_START;
+				cb.backtrack = nestingLevel;
+				lists.last().last().append(cb);
 				merged = true;
 				break;
+			}
 			case ')': {
-				concatLists(lists,merged);
+				if (!merged) multiplyLists(lists);
+				CharBlock cb;
+				cb.type = CharBlock::CBT_BACKTRACK_END;
+				cb.backtrack = nestedBrackets.takeLast();
+				for (int i=0;i<lists.last().size();i++)
+					lists.last()[i].append(cb);
+				concatLists(lists,true);
 				merged = false;
 				break;
 			}
@@ -462,23 +709,19 @@ int main(int argc, char* argv[])
 
 		concatLists(lists,merged);
 
-		if (expandOnly) {
-			for (int i=0;i<lists.first().length();i++) {
-				const BlockString& bs = lists.first()[i];
-				foreach (const CharBlock& cb, bs)
-					if (cb.type == CharBlock::CBT_FIXED)
-						printf("%c", cb.slowData[0]);
-					else if (cb.type == CharBlock::CBT_CHOOSE)
-						printf("[%s]", qPrintable(QString(cb.slowData).replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")));
-					else
-						break;
-				printf("\n");
+		for (int i=0;i<lists.first().length();i++) {
+			BlockString bs = purifyBacktracking(lists.first()[i]);
+			if (!expandOnly) {
+				if (printProgress) fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
+				printPossibilities(bs,chooseRandomized,maxExpandLines);
+			} else {
+				printExpanded(bs);
 			}
-		} else for (int i=0;i<lists.first().length();i++) {
-			if (printProgress) fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
-			printPossibilities(lists.first()[i],chooseRandomized,maxExpandLines);
 		}
 		Q_ASSERT(lists.size()==1);
+	}
+	} catch (const char* err)  {
+		fprintf(stderr, "Error: %s\n\n", err);
 	}
 	return 0;
 }
