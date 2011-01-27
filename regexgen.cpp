@@ -100,7 +100,8 @@ BlockString purifyBacktracking(const BlockString& strin){
 				btEnd[rid] = i;
 		}
 
-	if (btStart.contains(-1) || btEnd.contains(-1)) throw "invalid backtrack index";
+	if (btStart.contains(-1)) throw "invalid backtrack index (match bracket not opened)";
+	if (btStart.contains(-1)) throw "invalid backtrack index (match bracket not closed)";
 	//remove now useless bracket-ids
 	for (int i=str.size()-1;i>=0;i--)
 		if (str[i].type == CharBlock::CBT_BACKTRACK_START || str[i].type == CharBlock::CBT_BACKTRACK_END) {
@@ -660,10 +661,8 @@ int main(int argc, char* argv[])
 				CharBlock cb;
 				cb.type = CharBlock::CBT_BACKTRACK_START;
 				cb.backtrack = nestingLevel;
-				for (int i=0;i<lists.last().size();i++)
-					lists.last()[i].append(cb);
 				lists.append(BlockStringList());
-				lists.append(BlockStringList() << BlockString());
+				lists.append(BlockStringList() << (BlockString() << cb));
 				nestedBrackets << nestingLevel;
 				merged = true;
 				break;
@@ -681,7 +680,15 @@ int main(int argc, char* argv[])
 			}
 			case '|':{
 				concatLists(lists, merged);
-				lists.append(BlockStringList() << BlockString());
+				if (!nestedBrackets.isEmpty()) {
+					CharBlock cb;
+					cb.type = CharBlock::CBT_BACKTRACK_END;
+					cb.backtrack = nestedBrackets.last();
+					for (int i=0;i<lists.last().size();i++)
+						lists.last()[i].append(cb);
+					cb.type = CharBlock::CBT_BACKTRACK_START;
+					lists.append(BlockStringList() << (BlockString() << cb));
+				} else lists.append(BlockStringList() << BlockString());
 				merged = true;
 				break;
 			//case ']': case '}': Q_ASSERT(false); return;
