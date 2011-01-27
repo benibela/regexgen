@@ -656,25 +656,26 @@ int main(int argc, char* argv[])
 				break;
 			case '(':{
 				if (!merged) multiplyLists(lists);
-				lists.append(BlockStringList());
-				lists.append(BlockStringList() << BlockString());
 				nestingLevel++;
-				nestedBrackets << nestingLevel;
 				CharBlock cb;
 				cb.type = CharBlock::CBT_BACKTRACK_START;
 				cb.backtrack = nestingLevel;
-				lists.last().last().append(cb);
+				for (int i=0;i<lists.last().size();i++)
+					lists.last()[i].append(cb);
+				lists.append(BlockStringList());
+				lists.append(BlockStringList() << BlockString());
+				nestedBrackets << nestingLevel;
 				merged = true;
 				break;
 			}
 			case ')': {
 				if (!merged) multiplyLists(lists);
+				concatLists(lists,true);
 				CharBlock cb;
 				cb.type = CharBlock::CBT_BACKTRACK_END;
 				cb.backtrack = nestedBrackets.takeLast();
 				for (int i=0;i<lists.last().size();i++)
 					lists.last()[i].append(cb);
-				concatLists(lists,true);
 				merged = false;
 				break;
 			}
