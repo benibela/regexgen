@@ -346,7 +346,7 @@ QByteArray decodeEscape(const QString& range, int& i){
 }
 
 //creates a block for a [..] range
-CharBlock createBlock(const QString& range){
+CharBlock createBlock(const QString& range, bool caseInsensitive){
 	Q_ASSERT(range.length() > 0);
 	CharBlock cb;
 //	qDebug("%s", qPrintable(range));
@@ -375,6 +375,15 @@ CharBlock createBlock(const QString& range){
 
 		if (range.startsWith("^"))
 			cb.slowData = invertCharset(cb.slowData);
+	}
+	if (caseInsensitive) {
+		for (int i=0;i<cb.slowData.size();i++) {
+			char c = cb.slowData[i];
+			if (c >= 'a' && c <= 'z' && !cb.slowData.contains(c-'a'+'A')) cb.slowData += c - 'a'+'A';
+			else if (c >= 'A' && c <= 'Z' && !cb.slowData.contains(c-'A'+'a')) cb.slowData += c - 'A'+'a';
+		}
+		if (cb.slowData.size()>1)
+			cb.type = CharBlock::CBT_CHOOSE;
 	}
 	return cb;
 }
@@ -428,7 +437,6 @@ int main(int argc, char* argv[])
 	int INFINITY_PLUS = 5;
 	int INFINITY_STAR = 5;
 
-	bool specialCaseInsensitiveOperator = true;
 	bool expandOnly = false;
 	int maxExpandLines = -1;
 	bool chooseRandomized = false;
@@ -450,10 +458,7 @@ int main(int argc, char* argv[])
 	escapes.insert('}', "}");
 	escapes.insert('(', "(");
 	escapes.insert(')', ")");
-	if (specialCaseInsensitiveOperator) {
-		escapes.insert('<', "<");
-		escapes.insert('>', ">");
-	}
+
 	escapes.insert('+', "+");
 	escapes.insert('*', "*");
 	escapes.insert('?', "?");
@@ -483,11 +488,6 @@ int main(int argc, char* argv[])
 			INFINITY_STAR = QString(argv[i]).toInt();
 		} else if (arg=="-all") {
 			ALL_CHARACTERS = QString(argv[++i]);
-		} else if (arg=="-case-insensitiveness"){
-			QString o = QString(argv[++i]);
-			if (o == "local") specialCaseInsensitiveOperator = true;
-			else if (o == "disable") specialCaseInsensitiveOperator = false;
-			else Q_ASSERT(false);
 		} else if (arg=="-words"){
 			QString o = QString(argv[++i]);
 			escapes.insert('w', o);
@@ -506,11 +506,13 @@ int main(int argc, char* argv[])
 			printf("The syntax is pretty general, the allowed expressions are:\n");
 			printf("  [character set]\n");
 			printf("  {min, max}\n");
-			printf("  ?   equivalent to {0,1}\n");
-			printf("  +   equivalent to {1,INF} = {1,5}\n");
-			printf("  *   equivalent to {0,INF} = {1,5}\n");
-			printf("  .   equivalent to [ALL] = [0-9A-Za-z_+-...]\n");
-			printf("  <case ignore>  this is not standard regex, but <xyz> will match XYZ case insensitive.\n");
+			printf("  ?     equivalent to {0,1}\n");
+			printf("  +     equivalent to {1,INF} = {1,5}\n");
+			printf("  *     equivalent to {0,INF} = {1,5}\n");
+			printf("  .     equivalent to [ALL] = [0-9A-Za-z_+-...]\n");
+			printf("  \\i    backtrack to match i\n");
+			printf("  (?i)  Active case insensitiveness\n");
+			printf("  (?-i) Disable case insensitiveness\n");
 			printf("INF is defined as 5, because no program can generate an infinite number of strings.\n");
 			printf("(actually it could print an infinite number of strings to stdout, but quantifiers are expanded before printing in the current implementation)\n");
 			printf("^ and $ are ignored within the regex, but removed from start and end.\n");
@@ -518,7 +520,6 @@ int main(int argc, char* argv[])
 			printf("Program options:\n");
 			printf("  --inf \"replacement of infinity\"\n");
 			printf("  --all \"character range of .)\n");
-			printf("  --case-insensitiveness \"local|disabled\"\tdisable <..>\n");
 			printf("  --words \"character range of \\w\"\n");
 			printf("  --digits \"character range of \\d\"\n");
 			printf("  --reduce-to-charsets\tGenerate a set of regex limited to charsets that match the same strings as the original regex\n");
@@ -556,6 +557,7 @@ int main(int argc, char* argv[])
 		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
 		bool merged = true;
+		bool caseInsensitive = false;
 		int nestingLevel = 0;
 		QList<int> nestedBrackets;
 		loopCount++;
@@ -580,7 +582,7 @@ int main(int argc, char* argv[])
 				QString sub = cur.mid(i+1,n-1-i);
 				i = n;
 
-				lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
+				lists.append(BlockStringList() << (BlockString() << createBlock(sub, caseInsensitive )));
 				merged = false;
 				break;
 			}
@@ -608,7 +610,7 @@ int main(int argc, char* argv[])
 				} else if (cur[i] == 'Q') { //  \Q ... \E literal quotation
 					BlockString temp;
 					for (i++; cur[i] != '\\' || cur[i+1] != 'E'; i++)
-						temp << createBlock(""+cur[i]);
+						temp << createBlock(""+cur[i], caseInsensitive);
 					i++;
 					lists.append(BlockStringList() << temp);
 					merged=false;
@@ -619,13 +621,13 @@ int main(int argc, char* argv[])
 					if (sub.isEmpty())
 						break;
 				}
-				lists.append(BlockStringList() << (BlockString() << createBlock(sub)));
+				lists.append(BlockStringList() << (BlockString() << createBlock(sub,caseInsensitive)));
 				merged = false;
 				break;
 			}
 			case '.':
 				if (!merged) multiplyLists(lists);
-				lists.append(BlockStringList() << (BlockString() << createBlock(ALL_CHARACTERS)));
+				lists.append(BlockStringList() << (BlockString() << createBlock(ALL_CHARACTERS, false)));
 				merged = false;
 				break;
 			case '?':
@@ -655,18 +657,27 @@ int main(int argc, char* argv[])
 				multiplyLists(lists, 0, INFINITY_STAR);
 				merged = true;
 				break;
-			case '(':{
-				if (!merged) multiplyLists(lists);
-				nestingLevel++;
-				CharBlock cb;
-				cb.type = CharBlock::CBT_BACKTRACK_START;
-				cb.backtrack = nestingLevel;
-				lists.append(BlockStringList());
-				lists.append(BlockStringList() << (BlockString() << cb));
-				nestedBrackets << nestingLevel;
-				merged = true;
+			case '(': if (cur[i+1] == '?') {
+					Q_ASSERT(i + 3< cur.length());
+					//special command
+					i+=2;
+					if (cur[i] == '#') ; //comment
+					else if (cur[i] == 'i') caseInsensitive = true;
+					else if (cur[i] == '-' && cur[i+1] == 'i') caseInsensitive = false;
+					else throw "Unknown special (? bracket command";
+					while (cur[i]!=')') i++;
+				} else {
+					if (!merged) multiplyLists(lists);
+					nestingLevel++;
+					CharBlock cb;
+					cb.type = CharBlock::CBT_BACKTRACK_START;
+					cb.backtrack = nestingLevel;
+					lists.append(BlockStringList());
+					lists.append(BlockStringList() << (BlockString() << cb));
+					nestedBrackets << nestingLevel;
+					merged = true;
+				}
 				break;
-			}
 			case ')': {
 				if (!merged) multiplyLists(lists);
 				concatLists(lists,true);
@@ -693,24 +704,9 @@ int main(int argc, char* argv[])
 				break;
 			//case ']': case '}': Q_ASSERT(false); return;
 			} 
-			case '>': Q_ASSERT(!specialCaseInsensitiveOperator); if (specialCaseInsensitiveOperator) return -1; //FALL THROUGH
-			case '<': if (specialCaseInsensitiveOperator) { //FALL THROUGH
-				if (!merged) multiplyLists(lists);
-
-				int n = cur.indexOf('>',i);
-				QString sub = cur.mid(i+1,n-1-i);
-				i = n;
-
-				BlockString cbs;
-				for (int i=0;i<sub.length();i++)
-					cbs << createBlock(QString(sub[i].toLower())+QString(sub[i].toUpper()));
-				lists.append(BlockStringList() << cbs);
-				merged = false;
-				break;
-			}
 			default:
 				if (!merged) multiplyLists(lists);
-				lists.append(BlockStringList() << (BlockString() << createBlock(""+cur[i])));
+				lists.append(BlockStringList() << (BlockString() << createBlock(""+cur[i],caseInsensitive)));
 				merged = false;
 			}
 		}
