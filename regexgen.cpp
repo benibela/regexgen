@@ -438,7 +438,8 @@ int main(int argc, char* argv[])
 	int INFINITY_STAR = 5;
 
 	bool expandOnly = false;
-	int maxExpandLines = -1;
+	int maxExpandLines = -1, maxLength = 0;
+	bool truncateLonger = false;
 	bool chooseRandomized = false;
 
 	//character classes
@@ -500,6 +501,8 @@ int main(int argc, char* argv[])
 		else if (arg=="-choose-randomized") chooseRandomized = true;
 		else if (arg=="-max-expand-lines") maxExpandLines=QString(argv[++i]).toInt();
 		else if (arg=="-progress") printProgress = true;
+		else if (arg=="-max-length") maxLength = QString(argv[++i]).toInt();
+		else if (arg=="-max-length-action") truncateLonger = QString(argv[++i]).toLower() == "truncate";
 		else  {
 			printf("RegEx-Solution-Generator\n");
 			printf("This program generates to a list of simple regexs all strings matching these regex\n");
@@ -526,6 +529,9 @@ int main(int argc, char* argv[])
 			printf("  --choose-randomized\tDon't print all possible matches in a systematic way, but choose random ones\n");
 			printf("  --max-expand-lines \"max matches printed foreach charset regex\"\n");
 			printf("  --progress\tPrint progress to stderr\n");
+			printf("  --max-length \"characters\"\tMaximal length\n");
+			printf("  --max-length-action \"ignore|truncate\"\tIgnore (def) or truncate longer words\n");
+
 			return 0;
 		}
 	}
@@ -715,6 +721,10 @@ int main(int argc, char* argv[])
 
 		for (int i=0;i<lists.first().length();i++) {
 			BlockString bs = purifyBacktracking(lists.first()[i]);
+			if (maxLength > 0 && bs.size() > maxLength) {
+				if (!truncateLonger) continue;
+				else bs.erase(bs.begin() + maxLength, bs.end());
+			}
 			if (!expandOnly) {
 				if (printProgress) fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
 				printPossibilities(bs,chooseRandomized,maxExpandLines);
