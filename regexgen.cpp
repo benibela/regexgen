@@ -248,10 +248,12 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 	}
 
 	if (maxLines > 0) totalPos = maxLines;
-	int progressNext = printProgress?totalPos / 10:totalPos;
+	long int progressNext = printProgress?totalPos / 10:totalPos;
 
 	if (!randomized) {
-		int r = 0;
+		long int r = 0;
+		if (printProgress)
+			fprintf(stderr, "      Progress: %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
 		while (true) {
 			int i=0;
 			for (;i<actualBlockCount && vars[i].choosen == vars[i].len;  i++) {
@@ -267,7 +269,7 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 				r++;
 				if (unlikely(r>=progressNext)) {
 					if (printProgress) {
-						fprintf(stderr, "      Progress: %i/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
+						fprintf(stderr, "      Progress: %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
 						progressNext = qMin(totalPos, progressNext + totalPos/10);
 					}
 					if (maxLines > 0 && r>=maxLines) break;
