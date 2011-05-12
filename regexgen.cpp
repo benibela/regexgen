@@ -12,7 +12,7 @@
 
 
 QMap<QChar, QString> characterClasses;
-QString ALL_CHARACTERS = "0-9A-Za-z_+-*/=<>()[]{}!.,;:$%\"'#~";
+QString ALL_CHARACTERS = "0-9A-Za-z_+-*/=<>()[]{}!.,;:$%\"'#~&\\\\|@^?";
 bool printProgress = false;
 
 struct CharBlock {
@@ -291,7 +291,7 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 	}
 }
 
-void printExpanded(const BlockString& bs) {
+void printExpanded(const BlockString& bs, FILE* out = stdout) {
 	bool bt = false;
 	foreach (const CharBlock& cb, bs)
 		if (cb.type == CharBlock::CBT_BACKTRACK)
@@ -300,14 +300,14 @@ void printExpanded(const BlockString& bs) {
 	const char * bc = bt?")":"";
 	foreach (const CharBlock& cb, bs)
 		if (cb.type == CharBlock::CBT_FIXED)
-			printf("%s%c%s", bo, cb.slowData[0], bc);
+			fprintf(out,"%s%c%s", bo, cb.slowData[0], bc);
 		else if (cb.type == CharBlock::CBT_CHOOSE)
-			printf("%s[%s]%s", bo, qPrintable(QString(cb.slowData).replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")), bc);
+			fprintf(out,"%s[%s]%s", bo, qPrintable(QString(cb.slowData).replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")), bc);
 		else if (cb.type == CharBlock::CBT_BACKTRACK)
-			printf("%s\\%i%s", bo, cb.backtrack+1, bc);
+			fprintf(out,"%s\\%i%s", bo, cb.backtrack+1, bc);
 		else
 			continue;
-	printf("\n");
+	fprintf(out,"\n");
 }
 
 //expands a simplified [...] range to a list of all character matched by it
@@ -726,7 +726,10 @@ int main(int argc, char* argv[])
 				else bs.erase(bs.begin() + maxLength, bs.end());
 			}
 			if (!expandOnly) {
-				if (printProgress) fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
+				if (printProgress) {
+					fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
+					printExpanded(bs,stderr);
+				}
 				printPossibilities(bs,chooseRandomized,maxExpandLines);
 			} else {
 				printExpanded(bs);
