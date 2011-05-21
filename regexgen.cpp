@@ -208,15 +208,24 @@ BlockString purifyBacktracking(const BlockString& strin){
 	return str;
 }
 
+int64_t countPossibilities(const QList<CharBlock>& blocks) {
+	int64_t totalPos = 1;
+	foreach (const CharBlock& b, blocks)
+		if (b.type == CharBlock::CBT_CHOOSE){
+			totalPos = totalPos * b.slowData.length();
+		}
+	return totalPos;
+}
+
 //takes a simplified like (\[.*\]|.)* and prints all possibilities to choose characters in the character sets
 //(this will generate thousand-millions of equal-length words)
-void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines){
+void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines, int64_t startTotalPos, int64_t combinedTotalPos){
 	char word[blocks.length()+1];
 	CharBlock vars[blocks.size()+1];
 	CharBlock bts[blocks.size()+1];
 	int actualBlockCount = 0;
 	int actualBackTrackCount = 0;
-	long int totalPos = 1;
+	int64_t totalPos = 1;
 	for (int i=0;i<blocks.size();i++){
 		blocks[i].pos = i;
 		switch (blocks[i].type){
@@ -269,7 +278,7 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines)
 				r++;
 				if (unlikely(r>=progressNext)) {
 					if (printProgress) {
-						fprintf(stderr, "      Progress: %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
+						fprintf(stderr, "      Progress: %li/%li (%i%%)  %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos, r + startTotalPos, combinedTotalPos, ((int64_t)(r + startTotalPos)*100)/combinedTotalPos);
 						progressNext = qMin(totalPos, progressNext + totalPos/10);
 					}
 					if (maxLines > 0 && r>=maxLines) break;
@@ -721,21 +730,29 @@ int main(int argc, char* argv[])
 
 		concatLists(lists,merged);
 
+		QList<BlockString> rbs;
+		int64_t totalPos = 0, curPos = 0;
 		for (int i=0;i<lists.first().length();i++) {
 			BlockString bs = purifyBacktracking(lists.first()[i]);
 			if (maxLength > 0 && bs.size() > maxLength) {
 				if (!truncateLonger) continue;
 				else bs.erase(bs.begin() + maxLength, bs.end());
 			}
+			rbs << bs;
+			totalPos += countPossibilities(bs);
+		}
+		for (int i=0;i<rbs.size();i++) {
+			BlockString& bs = rbs[i];
 			if (!expandOnly) {
 				if (printProgress) {
-					fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur));
+					fprintf(stderr, "    Printing subregex %i/%i of %i:%s\n",  i+1, lists.first().length(), loopCount, qPrintable(cur), curPos, totalPos);
 					printExpanded(bs,stderr);
 				}
-				printPossibilities(bs,chooseRandomized,maxExpandLines);
+				printPossibilities(bs,chooseRandomized,maxExpandLines,curPos, totalPos);
 			} else {
 				printExpanded(bs);
 			}
+			curPos += countPossibilities(bs);
 		}
 		Q_ASSERT(lists.size()==1);
 	}
