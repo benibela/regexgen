@@ -262,7 +262,7 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines,
 	if (!randomized) {
 		long int r = 0;
 		if (printProgress)
-			fprintf(stderr, "      Progress: %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos);
+			fprintf(stderr, "      Progress: %li/%li (%i%%)    %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos, combinedTotalPos, startTotalPos, ((int64_t)(r + startTotalPos)*100)/combinedTotalPos);
 		while (true) {
 			int i=0;
 			for (;i<actualBlockCount && vars[i].choosen == vars[i].len;  i++) {
