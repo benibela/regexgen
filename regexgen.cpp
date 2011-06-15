@@ -6,6 +6,7 @@
 #include <QTextCodec>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define likely(x)       __builtin_expect(!!(x), 1)
 #define unlikely(x)     __builtin_expect(!!(x), 0)
@@ -35,7 +36,7 @@ struct CharBlock {
 #define BlockStringList QList< BlockString >
 
 int randUntil(int until){
-	return random() % until;
+	return rand() % until;
 }
 
 char charConv(const QChar& c){
@@ -262,7 +263,9 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines,
 	if (!randomized) {
 		long int r = 0;
 		if (printProgress)
-			fprintf(stderr, "      Progress: %li/%li (%i%%)    %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos, combinedTotalPos, startTotalPos, ((int64_t)(r + startTotalPos)*100)/combinedTotalPos);
+			fprintf(stderr, "      Progress: %li/%li (%i%%)    %li/%li (%i%%)\n", 
+			        r, totalPos, ((long int)(r)*100)/totalPos, 
+			        startTotalPos, combinedTotalPos, ((int64_t)(r + startTotalPos)*100)/combinedTotalPos);
 		while (true) {
 			int i=0;
 			for (;i<actualBlockCount && vars[i].choosen == vars[i].len;  i++) {
@@ -278,7 +281,9 @@ void printPossibilities(QList<CharBlock>& blocks, bool randomized, int maxLines,
 				r++;
 				if (unlikely(r>=progressNext)) {
 					if (printProgress) {
-						fprintf(stderr, "      Progress: %li/%li (%i%%)  %li/%li (%i%%)\n", r, totalPos, ((long int)(r)*100)/totalPos, r + startTotalPos, combinedTotalPos, ((int64_t)(r + startTotalPos)*100)/combinedTotalPos);
+						fprintf(stderr, "      Progress: %li/%li (%i%%)  %li/%li (%i%%)\n", 
+						        r, totalPos, ((long int)(r)*100)/totalPos, 
+						        r + startTotalPos, combinedTotalPos, ((int64_t)(r + startTotalPos)*100)/combinedTotalPos);
 						progressNext = qMin(totalPos, progressNext + totalPos/10);
 					}
 					if (maxLines > 0 && r>=maxLines) break;
