@@ -1,3 +1,6 @@
+/* Reverse regular expression engine that calculates strings matching a given regex.
+   See below "RegEx-Solution-Generator\n" for the help or call it with --help.
+*/
 #include <QTextStream>
 #include <QString>
 #include <QStringList>
