@@ -1,0 +1,2 @@
+include programs/data/regexgen
+rename programs/data/regexgen .
