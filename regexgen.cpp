@@ -484,6 +484,7 @@ int main(int argc, char* argv[])
 	escapes.insert('?', "?");
 	escapes.insert('.', ".");
 	escapes.insert('$', "$");
+	escapes.insert('^', "^");
 	escapes.insert('.', ".");
 	escapes.insert('|', "|");
 	escapes.insert('n', "\n");
@@ -537,7 +538,6 @@ int main(int argc, char* argv[])
 			printf("  (?-i) Disable case insensitiveness\n");
 			printf("INF is defined as 5, because no program can generate an infinite number of strings.\n");
 			printf("(actually it could print an infinite number of strings to stdout, but quantifiers are expanded before printing in the current implementation)\n");
-			printf("^ and $ are ignored within the regex, but removed from start and end.\n");
 			printf("If you use nested optional brackets like (()?)? you may get duplicated strings.\n");
 			printf("Program options:\n");
 			printf("  --inf \"replacement of infinity\"\n");
@@ -578,8 +578,6 @@ int main(int argc, char* argv[])
 		//printf("%i:",cur.length());
 		//for (int i=0;i<cur.length();i++)
 		//	printf("%u-", (256+charConv(cur[i])*1) % 256);
-		if (cur.startsWith("^")) cur = cur.mid(1);
-		if (cur.endsWith("$")) cur = cur.left(cur.size()-1);
 
 		bool merged = true;
 		bool caseInsensitive = false;
@@ -599,6 +597,7 @@ int main(int argc, char* argv[])
 
 		for (int i=0;i<cur.length();i++){
 			switch (cur[i].toAscii()) {
+			case '^': case '$': break; //ignore start/end marker. (we always assume that they are there anyways)
 			case '[':{
 				if (!merged) multiplyLists(lists);
 

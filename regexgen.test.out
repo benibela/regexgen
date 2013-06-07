@@ -504,13 +504,13 @@ st
 sat
 sbt
 15
-^mi$
-^mi
-^moo$
-^moo
-mi$
 mi
-moo$
+mi
+moo
+moo
+mi
+mi
+moo
 moo
 16
 00
@@ -1883,3 +1883,5 @@ a
 xc=cy
 xd=dy
 e
+22
+a$b^c
