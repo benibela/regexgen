@@ -533,6 +533,7 @@ int main(int argc, char* argv[])
 			printf("  +     equivalent to {1,INF} = {1,5}\n");
 			printf("  *     equivalent to {0,INF} = {1,5}\n");
 			printf("  .     equivalent to [ALL] = [0-9A-Za-z_+-...]\n");
+			printf("  \\x    escaped x (e.g. \\$) or character class (e.g. \\d) \n");
 			printf("  \\i    backtrack to match i\n");
 			printf("  (?i)  Active case insensitiveness\n");
 			printf("  (?-i) Disable case insensitiveness\n");
